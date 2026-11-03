@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 import boto3
 from botocore.client import Config
+from botocore.exceptions import ClientError
 import os
 
 # MinIO settings (can also come from env vars)
@@ -48,11 +49,19 @@ def list_objects(bucket_name: str):
 
 
 @app.post("/buckets/{bucket_name}/upload")
-async def upload_file(bucket_name: str, file: UploadFile = File(...), path: str | None = Form(None)):
-    """Upload a file to a bucket and optionally under a full path"""
-    key = (path or file.filename or "").strip("/")
-    if not key:
-        raise HTTPException(status_code=400, detail="Invalid path")
+async def upload_file(
+    bucket_name: str,
+    file: UploadFile = File(...),
+    # examples=[""] : sinon Swagger pré-remplit le champ avec la valeur "string", qui serait envoyée comme dossier
+    path: str | None = Form(None, examples=[""]),
+):
+    """Upload a file to a bucket, optionally under a folder (path)"""
+    filename = (file.filename or "").strip("/")
+    if not filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    folder = (path or "").strip("/")
+    key = f"{folder}/{filename}" if folder else filename
 
     try:
         s3.head_bucket(Bucket=bucket_name)
@@ -81,7 +90,19 @@ def download_file(bucket_name: str, filename: str):
 def delete_object(bucket_name: str, key: str):
     """Delete an object from a bucket (the key may contain slashes)"""
     try:
-        s3.delete_object(Bucket=bucket_name, Key=key)
-        return {"message": f"Object '{key}' deleted from bucket '{bucket_name}'"}
-    except s3.exceptions.NoSuchBucket:
-        raise HTTPException(status_code=404, detail="Bucket not found")
+        s3.head_bucket(Bucket=bucket_name)
+    except ClientError as e:
+        if e.response["Error"]["Code"] in ("404", "NoSuchBucket"):
+            raise HTTPException(status_code=404, detail="Bucket not found")
+        raise
+
+    # S3 répond 204 même si la clé n'existe pas : il faut vérifier avant de supprimer
+    try:
+        s3.head_object(Bucket=bucket_name, Key=key)
+    except ClientError as e:
+        if e.response["Error"]["Code"] in ("404", "NoSuchKey"):
+            raise HTTPException(status_code=404, detail=f"Object '{key}' not found in bucket '{bucket_name}'")
+        raise
+
+    s3.delete_object(Bucket=bucket_name, Key=key)
+    return {"message": f"Object '{key}' deleted from bucket '{bucket_name}'"}
