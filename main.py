@@ -75,3 +75,13 @@ def download_file(bucket_name: str, filename: str):
         return {"download_url": url}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/buckets/{bucket_name}/objects/{key:path}")
+def delete_object(bucket_name: str, key: str):
+    """Delete an object from a bucket (the key may contain slashes)"""
+    try:
+        s3.delete_object(Bucket=bucket_name, Key=key)
+        return {"message": f"Object '{key}' deleted from bucket '{bucket_name}'"}
+    except s3.exceptions.NoSuchBucket:
+        raise HTTPException(status_code=404, detail="Bucket not found")
