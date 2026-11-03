@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 import boto3
 from botocore.client import Config
 import os
@@ -48,15 +48,19 @@ def list_objects(bucket_name: str):
 
 
 @app.post("/buckets/{bucket_name}/upload")
-async def upload_file(bucket_name: str, file: UploadFile = File(...)):
-    """Upload a file to a bucket"""
+async def upload_file(bucket_name: str, file: UploadFile = File(...), path: str | None = Form(None)):
+    """Upload a file to a bucket and optionally under a full path"""
+    key = (path or file.filename or "").strip("/")
+    if not key:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
     try:
         s3.head_bucket(Bucket=bucket_name)
     except:
         s3.create_bucket(Bucket=bucket_name)
     
-    s3.upload_fileobj(file.file, bucket_name, file.filename)
-    return {"message": f"File '{file.filename}' uploaded to bucket '{bucket_name}'"}
+    s3.upload_fileobj(file.file, bucket_name, key)
+    return {"message": f"File '{key}' uploaded to bucket '{bucket_name}'"}
 
 
 @app.get("/buckets/{bucket_name}/download/{filename}")
